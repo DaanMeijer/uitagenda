@@ -1,0 +1,17 @@
+{
+    "name": "daan/agenda",
+    "description": "Agenda Parser voor de Uit-agenda",
+    "type": "project",
+    "require": {
+        "phpoffice/phpword": "^0.13.0"
+    },
+    "authors": [
+        {
+            "name": "Daan Meijer",
+            "email": "daan@studioseptember.nl"
+        }
+    ],
+	"autoload": {
+        "psr-4": {"Merel\\Agenda\\": "src/"}
+    }
+}
