@@ -29,11 +29,19 @@ class Parser implements Listener {
 	}
 	
 	public function haveDay($day, $matches = []){
+
 		foreach($this->listeners as $listener){
 			$listener->haveDay($day);
 		}
-		$this->day_of_month = $matches[1];
-		$this->day_of_week = $matches[2];
+
+		if(count($matches) > 1) {
+			$this->day_of_month = $matches[1];
+		}
+
+		if(count($matches) > 2) {
+			$this->day_of_week = $matches[2];
+		}
+
 		$this->category = '';
 	}
 	
@@ -55,10 +63,22 @@ class Parser implements Listener {
 			$listener->haveTitle($title);
 		}
 	}
-	
+
 	public function haveDescription($description){
 		foreach($this->listeners as $listener){
 			$listener->haveDescription($description);
+		}
+	}
+
+	public function haveAudience($audience){
+		foreach($this->listeners as $listener){
+			$listener->haveAudience($audience);
+		}
+	}
+
+	public function havePremiere($premiere){
+		foreach($this->listeners as $listener){
+			$listener->havePremiere($premiere);
 		}
 	}
 	
@@ -108,9 +128,13 @@ class Parser implements Listener {
 					'October',
 					'November',
 					'December',
+					'Movies',
+					'Festivals & Events',
+					'Exhibitions & Museums',
+					'Kids',
 				])){
 					$this->haveMonth($text);
-				}elseif(strlen($text) > 50){
+				}elseif(strlen($text) > 64){
 					$this->haveCombinedItem($text);
 				}else{
 					$this->haveCategory($text);
@@ -121,7 +145,7 @@ class Parser implements Listener {
 				//item!
 				$text = implode('', $this->stack);
 				
-				if(strlen($text) > 50){
+				if(strlen($text) > 64){
 					$this->haveCombinedItem($text);
 				}else{
 					$this->haveCategory($text);
@@ -135,8 +159,231 @@ class Parser implements Listener {
 		$this->stack = [];
 	}
 	
-	public function parse($fileName){
+	public function parse($fileName, $mimeType){
 		
+		switch($mimeType){
+			case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+				$this->parseDocx($fileName);
+				break;
+
+			case null:
+			case 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
+				$this->parseXlsx($fileName);
+				break;
+			default:
+				var_dump($mimeType, $fileName);
+				die();
+				break;
+		}
+		
+	}
+	
+	public function parseXlsx($fileName){
+		$type = \PHPExcel_IOFactory::identify($fileName);
+		$reader = \PHPExcel_IOFactory::createReader($type);
+		$reader->setReadDataOnly(TRUE);
+
+		$phpExcel = $reader->load($fileName);
+
+		foreach($phpExcel->getAllSheets() as $sheet){
+
+			$lookup = [];
+			$col = 0;
+			do {
+				$name = $sheet->getCellByColumnAndRow($col, 1)->getValue();
+				if($name){
+					$lookup[strtolower($name)] = $col;
+				}
+				$col++;
+			}while($name);
+
+			if(!isset($lookup['locatienaam'])){
+				continue;
+			}
+
+
+			$this->haveAudience($sheet->getTitle());
+
+
+//			var_dump($sheet->getTitle(), $lookup);
+
+			$highestRow = $sheet->getHighestRow();
+
+			for($a=2; $a<$highestRow; $a++){
+
+
+
+
+
+				switch(strtolower($sheet->getTitle())){
+					case 'agenda':
+					case 'leidsche rijn':
+					case 'kids':
+
+						$location = $sheet->getCellByColumnAndRow($lookup['locatienaam'], $a)->getValue();
+
+						if(!$location){
+							continue;
+						}
+
+						$dayCell = $sheet->getCellByColumnAndRow($lookup['van'], $a);
+						$day = $dayCell->getFormattedValue();
+
+						if($day){
+							$date =\PHPExcel_Shared_Date::ExcelToPHP($day);
+							$timestamp = new \DateTime();
+							$timestamp->setTimestamp($date);
+
+							$day = $timestamp->format("j l");
+							$matches = [$day, $timestamp->format("j"), $timestamp->format("l")];
+
+							$this->haveDay($day, $matches);
+						}
+
+						$category = $sheet->getCellByColumnAndRow($lookup['type'], $a)->getValue();
+						if($category) {
+							$this->haveCategory( $category );
+						}
+
+						$this->haveLocation($location . ' >');
+
+						$title = $sheet->getCellByColumnAndRow($lookup['titel'], $a)->getValue();
+
+						$time = $sheet->getCellByColumnAndRow($lookup['tijdstip'], $a)->getFormattedValue();
+
+
+						if(is_numeric($time)){
+							$time = $time * (24*60);
+							$time = sprintf('[%02d:%02d]', floor($time / 60), $time % 60);
+						}
+
+						if($time){
+							$title .= ' ' . $time;
+						}
+
+						$this->haveTitle($title);
+
+
+						$description = $sheet->getCellByColumnAndRow($lookup['korte beschrijving'], $a)->getValue();
+						$description = preg_replace('/_x000D_/', '', $description);
+						$this->haveDescription($description);
+
+						break;
+
+					case 'film':
+
+						$dayCell = $sheet->getCellByColumnAndRow($lookup['van'], $a);
+						$day = $dayCell->getFormattedValue();
+
+						if(!$day){
+							continue;
+						}
+
+						$location = $sheet->getCellByColumnAndRow($lookup['locatienaam'], $a)->getValue();
+						if($location){
+							$this->haveDay($location);
+						}
+
+						$this->haveLocation($day);
+
+						$premiere = $sheet->getCellByColumnAndRow($lookup['première'], $a);
+						if($premiere){
+							$this->havePremiere($premiere);
+						}
+
+						$title = $sheet->getCellByColumnAndRow($lookup['titel'], $a)->getValue();
+
+						$time = $sheet->getCellByColumnAndRow($lookup['tijdstip'], $a)->getFormattedValue();
+
+
+						if(is_numeric($time)){
+							$time = $time * (24*60);
+							$time = sprintf('[%02d:%02d]', floor($time / 60), $time % 60);
+						}
+
+						if($time){
+							$title .= ' ' . $time;
+						}
+
+						$this->haveTitle($title);
+
+						$description = $sheet->getCellByColumnAndRow($lookup['korte beschrijving'], $a)->getValue();
+						$description = preg_replace('/_x000D_/', '', $description);
+						$this->haveDescription($description);
+
+						break;
+
+					case 'musea & expo':
+
+
+
+						$dayCell = $sheet->getCellByColumnAndRow($lookup['van'], $a);
+						$day = $dayCell->getFormattedValue();
+
+						if(!$day){
+							continue;
+						}
+
+						$location = $sheet->getCellByColumnAndRow($lookup['locatienaam'], $a)->getValue();
+						if($location){
+							$this->haveCategory($location);
+						}
+
+
+						$this->haveLocation($day . ' >');
+
+						$title = $sheet->getCellByColumnAndRow($lookup['titel'], $a)->getValue();
+						$this->haveTitle($title);
+
+						$description = $sheet->getCellByColumnAndRow($lookup['korte beschrijving'], $a)->getValue();
+						$description = preg_replace('/_x000D_/', '', $description);
+						$this->haveDescription($description);
+
+						break;
+
+					case 'festival & evenementen':
+
+						$location = $sheet->getCellByColumnAndRow($lookup['locatienaam'], $a)->getValue();
+
+						if(!$location){
+							continue;
+						}
+
+						$title = $sheet->getCellByColumnAndRow($lookup['titel - datum'], $a)->getValue();
+						$this->haveCategory($title);
+
+						if($location){
+							$this->haveLocation($location . ' >');
+						}
+
+						$time = $sheet->getCellByColumnAndRow($lookup['tijdstip'], $a)->getFormattedValue();
+
+						if(is_numeric($time)){
+							$time = $time * (24*60);
+							$time = sprintf('[%02d:%02d]', floor($time / 60), $time % 60);
+						}
+						$this->haveTitle($time);
+
+						$description = $sheet->getCellByColumnAndRow($lookup['korte beschrijving'], $a)->getValue();
+						$description = preg_replace('/_x000D_/', '', $description);
+						$this->haveDescription($description);
+
+						break;
+
+
+
+					default:
+						var_dump($sheet->getTitle());
+						die();
+						break;
+				}
+
+			}
+		}
+
+	}
+	
+	public function parseDocx($fileName){
 		$phpWord = \PhpOffice\PhpWord\IOFactory::load($fileName);
 	
 		$sections = $phpWord->getSections();
@@ -179,7 +426,6 @@ class Parser implements Listener {
 
 			}
 		}
-		
 	}
 	
 }

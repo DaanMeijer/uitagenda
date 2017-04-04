@@ -3,7 +3,8 @@
     "description": "Agenda Parser voor de Uit-agenda",
     "type": "project",
     "require": {
-        "phpoffice/phpword": "^0.13.0"
+        "phpoffice/phpword": "^0.13.0",
+        "phpoffice/phpexcel": "^1.8"
     },
     "authors": [
         {
